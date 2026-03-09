@@ -80,7 +80,7 @@ export default function ConnectorCard({
         </div>
       </CardHeader>
       <CardContent className="flex-1 flex flex-col justify-end space-y-4">
-        {connector?.available ? (
+        {connector?.available || isConnected ? (
           <div className="space-y-3">
             {isConnected ? (
               <div className="flex gap-2 overflow-hidden w-full">
