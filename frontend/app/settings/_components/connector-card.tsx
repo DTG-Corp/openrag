@@ -53,10 +53,7 @@ export default function ConnectorCard({
         <div className="flex flex-col items-start justify-between">
           <div className="flex flex-col gap-4 mb-2 w-full">
             <div className="flex items-center justify-between mb-1">
-              <CardIcon
-                isActive={!!isConnected}
-                activeBgColor="bg-white"
-              >
+              <CardIcon isActive={!!isConnected} activeBgColor="bg-white">
                 {connector.icon}
               </CardIcon>
               {isConnected ? (
@@ -80,29 +77,47 @@ export default function ConnectorCard({
         </div>
       </CardHeader>
       <CardContent className="flex-1 flex flex-col justify-end space-y-4">
-        {isConnected ? (
-          <div className="flex gap-2 overflow-hidden w-full">
-            <Button
-              variant="default"
-              onClick={() => onNavigateToKnowledge(connector)}
-              disabled={isDisconnecting || isConnecting}
-              className="cursor-pointer !text-sm truncate rounded-md"
-              size="md"
-            >
-              <Plus className="h-4 w-4" />
-              <span className="text-mmd truncate">Add Knowledge</span>
-            </Button>
-            {onConfigure ? (
-              <Button
-                variant="outline"
-                onClick={() => onConfigure(connector)}
-                disabled={isConnecting || isDisconnecting}
-                className="cursor-pointer"
-                size="iconMd"
-                title="Edit configuration"
-              >
-                <Settings2 className="h-4 w-4" />
-              </Button>
+        {connector?.available ? (
+          <div className="space-y-3">
+            {isConnected ? (
+              <div className="flex gap-2 overflow-hidden w-full">
+                <Button
+                  variant="default"
+                  onClick={() => onNavigateToKnowledge(connector)}
+                  disabled={isDisconnecting || isConnecting}
+                  className="cursor-pointer !text-sm truncate rounded-md flex-1"
+                  size="md"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span className="text-mmd truncate">Add Knowledge</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => onConnect(connector)}
+                  disabled={isConnecting || isDisconnecting}
+                  className="cursor-pointer"
+                  size="iconMd"
+                >
+                  {isConnecting ? (
+                    <RefreshCcw className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCcw className="h-4 w-4" />
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => onDisconnect(connector)}
+                  disabled={isDisconnecting || isConnecting}
+                  className="cursor-pointer text-destructive hover:text-destructive"
+                  size="iconMd"
+                >
+                  {isDisconnecting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
             ) : (
               <Button
                 variant="outline"
@@ -159,18 +174,15 @@ export default function ConnectorCard({
           </Button>
         ) : (
           <div className="text-sm text-muted-foreground">
-            <p>
-              See our{" "}
-              <Link
-                className="text-accent-pink-foreground"
-                href="https://docs.openr.ag/knowledge#oauth-ingestion"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Cloud Connectors installation guide
-              </Link>{" "}
-              for more detail.
-            </p>
+            <p>For more details see our</p>
+            <Link
+              className="text-accent-pink-foreground"
+              href="https://docs.openr.ag/knowledge#oauth-ingestion"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Cloud Connectors guide
+            </Link>
           </div>
         )}
       </CardContent>
