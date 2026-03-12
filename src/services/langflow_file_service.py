@@ -1,4 +1,6 @@
 import json
+import asyncio
+import httpx
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -12,6 +14,23 @@ class LangflowFileService:
     def __init__(self):
         self.flow_id_ingest = LANGFLOW_INGEST_FLOW_ID
         self.flow_id_url_ingest = LANGFLOW_URL_INGEST_FLOW_ID
+
+    _TRANSIENT_STATUS_CODES = {408, 429, 500, 502, 503, 504}
+
+    @classmethod
+    def _is_transient_status(cls, status_code: int) -> bool:
+        return status_code in cls._TRANSIENT_STATUS_CODES
+
+    @staticmethod
+    def _is_transient_request_error(error: Exception) -> bool:
+        return isinstance(
+            error,
+            (
+                httpx.TimeoutException,
+                httpx.NetworkError,
+                httpx.RequestError,
+            ),
+        )
 
     async def upload_user_file(
         self, file_tuple, jwt_token: Optional[str] = None
@@ -324,22 +343,14 @@ class LangflowFileService:
         return resp.json()
 
     async def _ensure_url_ingest_flow_id(self) -> str:
-        """Ensure URL ingest flow ID is valid; import flow if missing."""
+        """Ensure URL ingest flow ID is valid; import flow if missing.
+
+        Retries once for transient Langflow failures so short outages do not
+        permanently block URL ingestion for the current process.
+        """
         configured_flow_id = self.flow_id_url_ingest
-        if configured_flow_id:
-            check_resp = await clients.langflow_request(
-                "GET", f"/api/v1/flows/{configured_flow_id}"
-            )
-            if check_resp.status_code < 400:
-                return configured_flow_id
-            if check_resp.status_code != 404:
-                logger.warning(
-                    "[LF] URL ingest flow check returned non-404 error",
-                    flow_id=configured_flow_id,
-                    status_code=check_resp.status_code,
-                    body_preview=check_resp.text[:300],
-                )
-                check_resp.raise_for_status()
+        max_attempts = 2
+        last_error: Exception | None = None
 
         flow_file = Path(__file__).resolve().parents[2] / "flows" / "openrag_url_mcp.json"
         if not flow_file.exists():
@@ -347,38 +358,109 @@ class LangflowFileService:
                 "LANGFLOW_URL_INGEST_FLOW_ID is invalid and "
                 f"flow file was not found at {flow_file}"
             )
-
-        logger.warning(
-            "[LF] URL ingest flow ID missing/invalid; importing flow JSON",
-            flow_file=str(flow_file),
-            previous_flow_id=configured_flow_id,
-        )
         with flow_file.open("r", encoding="utf-8") as f:
             flow_payload = json.load(f)
 
-        create_resp = await clients.langflow_request(
-            "POST", "/api/v1/flows/", json=flow_payload
-        )
-        if create_resp.status_code not in (200, 201):
-            logger.error(
-                "[LF] Failed to import URL ingest flow",
-                status_code=create_resp.status_code,
-                body_preview=create_resp.text[:500],
-            )
-            create_resp.raise_for_status()
+        for attempt in range(1, max_attempts + 1):
+            try:
+                if configured_flow_id:
+                    check_resp = await clients.langflow_request(
+                        "GET", f"/api/v1/flows/{configured_flow_id}"
+                    )
+                    if check_resp.status_code < 400:
+                        return configured_flow_id
+                    if check_resp.status_code != 404:
+                        if self._is_transient_status(check_resp.status_code):
+                            if attempt < max_attempts:
+                                logger.warning(
+                                    "[LF] Transient URL ingest flow check failure, retrying once",
+                                    status_code=check_resp.status_code,
+                                    attempt=attempt,
+                                    max_attempts=max_attempts,
+                                    retry_in_seconds=1,
+                                )
+                                await asyncio.sleep(1)
+                                continue
+                            raise httpx.HTTPStatusError(
+                                "URL ingest flow check failed",
+                                request=check_resp.request,
+                                response=check_resp,
+                            )
+                        logger.warning(
+                            "[LF] URL ingest flow check returned non-404 error",
+                            flow_id=configured_flow_id,
+                            status_code=check_resp.status_code,
+                            body_preview=check_resp.text[:300],
+                        )
+                        check_resp.raise_for_status()
 
-        flow_data = create_resp.json()
-        imported_flow_id = flow_data.get("id")
-        if not imported_flow_id:
-            raise ValueError("Langflow flow import succeeded but no flow id was returned")
+                logger.warning(
+                    "[LF] URL ingest flow ID missing/invalid; importing flow JSON",
+                    flow_file=str(flow_file),
+                    previous_flow_id=configured_flow_id,
+                )
+                create_resp = await clients.langflow_request(
+                    "POST", "/api/v1/flows/", json=flow_payload
+                )
+                if create_resp.status_code not in (200, 201):
+                    if self._is_transient_status(create_resp.status_code):
+                        if attempt < max_attempts:
+                            logger.warning(
+                                "[LF] Transient URL ingest flow import failure, retrying once",
+                                status_code=create_resp.status_code,
+                                attempt=attempt,
+                                max_attempts=max_attempts,
+                                retry_in_seconds=1,
+                            )
+                            await asyncio.sleep(1)
+                            continue
+                        raise httpx.HTTPStatusError(
+                            "URL ingest flow import failed",
+                            request=create_resp.request,
+                            response=create_resp,
+                        )
+                    logger.error(
+                        "[LF] Failed to import URL ingest flow",
+                        status_code=create_resp.status_code,
+                        body_preview=create_resp.text[:500],
+                    )
+                    create_resp.raise_for_status()
 
-        self.flow_id_url_ingest = imported_flow_id
-        logger.warning(
-            "[LF] Imported URL ingest flow for current runtime",
-            imported_flow_id=imported_flow_id,
-            note="Persist this in LANGFLOW_URL_INGEST_FLOW_ID to avoid re-importing on restart.",
-        )
-        return imported_flow_id
+                flow_data = create_resp.json()
+                imported_flow_id = flow_data.get("id")
+                if not imported_flow_id:
+                    raise ValueError(
+                        "Langflow flow import succeeded but no flow id was returned"
+                    )
+
+                self.flow_id_url_ingest = imported_flow_id
+                logger.warning(
+                    "[LF] Imported URL ingest flow for current runtime",
+                    imported_flow_id=imported_flow_id,
+                    note="Persist this in LANGFLOW_URL_INGEST_FLOW_ID to avoid re-importing on restart.",
+                )
+                return imported_flow_id
+
+            except httpx.RequestError as e:
+                last_error = e
+                if attempt == max_attempts:
+                    raise
+                logger.warning(
+                    "[LF] Transient request error during URL ingest auto-heal, retrying once",
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    retry_in_seconds=1,
+                    error=str(e),
+                )
+                await asyncio.sleep(1)
+
+            except Exception as e:
+                last_error = e
+                raise
+
+        if last_error:
+            raise last_error
+        raise RuntimeError("Unable to validate/import URL ingest flow")
 
     async def upload_and_ingest_file(
         self,
