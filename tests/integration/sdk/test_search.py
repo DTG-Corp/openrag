@@ -72,5 +72,5 @@ class TestSearchExtended:
 
         results = await client.search.query("purple elephants dancing", limit=5)
         for result in results.results:
-            assert result.content is not None
-            assert isinstance(result.content, str)
+            assert result.text is not None
+            assert isinstance(result.text, str)

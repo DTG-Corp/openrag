@@ -42,12 +42,10 @@ class TestErrorHandling:
             await client.chat.get(str(uuid.uuid4()))
 
     @pytest.mark.asyncio
-    async def test_delete_nonexistent_conversation_raises_not_found(self, client):
-        """Deleting a conversation that never existed must raise NotFoundError."""
-        from openrag_sdk.exceptions import NotFoundError
-
-        with pytest.raises(NotFoundError):
-            await client.chat.delete(str(uuid.uuid4()))
+    async def test_delete_nonexistent_conversation_returns_false(self, client):
+        """Deleting a conversation that never existed must return False."""
+        result = await client.chat.delete(str(uuid.uuid4()))
+        assert result is False
 
     @pytest.mark.asyncio
     async def test_invalid_settings_value_raises_error(self, client):
