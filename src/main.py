@@ -238,9 +238,7 @@ async def init_index(opensearch_client=None):
         # Create documents index
         index_name = get_index_name()
         if not await os_client.indices.exists(index=index_name):
-            await os_client.indices.create(
-                index=index_name, body=dynamic_index_body
-            )
+            await os_client.indices.create(index=index_name, body=dynamic_index_body)
             logger.info(
                 "Created OpenSearch index",
                 index_name=index_name,
@@ -278,9 +276,7 @@ async def init_index(opensearch_client=None):
             }
         }
 
-        if not await os_client.indices.exists(
-            index=knowledge_filter_index_name
-        ):
+        if not await os_client.indices.exists(index=knowledge_filter_index_name):
             await os_client.indices.create(
                 index=knowledge_filter_index_name, body=knowledge_filter_index_body
             )
@@ -409,7 +405,10 @@ def _should_use_url_default_docs_ingest() -> bool:
 
 
 async def ingest_openrag_docs_when_ready(
-    document_service, task_service, langflow_file_service, session_manager,
+    document_service,
+    task_service,
+    langflow_file_service,
+    session_manager,
     jwt_token=None,
 ):
     """Ingest OpenRAG docs during onboarding."""
@@ -452,7 +451,10 @@ async def ingest_openrag_docs_when_ready(
 
 
 async def ingest_default_documents_when_ready(
-    document_service, task_service, langflow_file_service, session_manager,
+    document_service,
+    task_service,
+    langflow_file_service,
+    session_manager,
     jwt_token=None,
 ):
     """Ingest default OpenRAG docs during onboarding."""
@@ -468,10 +470,17 @@ async def ingest_default_documents_when_ready(
         task_id = None
         if _should_use_url_default_docs_ingest():
             task_id = await ingest_openrag_docs_when_ready(
-                document_service, task_service, langflow_file_service, session_manager,jwt_token=jwt_token,
+                document_service,
+                task_service,
+                langflow_file_service,
+                session_manager,
+                jwt_token=jwt_token,
             )
         await ingest_openrag_docs_when_ready(
-            document_service, task_service, langflow_file_service, session_manager,
+            document_service,
+            task_service,
+            langflow_file_service,
+            session_manager,
             jwt_token=jwt_token,
         )
 
@@ -484,7 +493,7 @@ async def ingest_default_documents_when_ready(
         excluded_files = set(EXCLUDED_INGESTION_FILES)
         if _should_use_url_default_docs_ingest():
             excluded_files.update(URL_INGEST_EXCLUDED_INGESTION_FILES)
-        
+
         file_paths = [
             os.path.join(root, fn)
             for root, _, files in os.walk(base_dir)
@@ -497,12 +506,23 @@ async def ingest_default_documents_when_ready(
 
         if DISABLE_INGEST_WITH_LANGFLOW:
             new_task_id = await _ingest_default_documents_openrag(
-                document_service, task_service, file_paths, existing_task_id=task_id, connector_type="local",jwt_token=jwt_token
+                document_service,
+                task_service,
+                file_paths,
+                existing_task_id=task_id,
+                connector_type="local",
+                jwt_token=jwt_token,
             )
             task_id = new_task_id or task_id
         else:
             new_task_id = await _ingest_default_documents_langflow(
-                langflow_file_service, session_manager, task_service, file_paths, existing_task_id=task_id, connector_type="local",jwt_token=jwt_token
+                langflow_file_service,
+                session_manager,
+                task_service,
+                file_paths,
+                existing_task_id=task_id,
+                connector_type="local",
+                jwt_token=jwt_token,
             )
             task_id = new_task_id or task_id
 
@@ -521,7 +541,13 @@ async def ingest_default_documents_when_ready(
 
 
 async def _ingest_default_documents_langflow(
-    langflow_file_service, session_manager, task_service, file_paths, existing_task_id: str = None, connector_type: str = "openrag_docs",jwt_token=None,
+    langflow_file_service,
+    session_manager,
+    task_service,
+    file_paths,
+    existing_task_id: str = None,
+    connector_type: str = "openrag_docs",
+    jwt_token=None,
 ):
     """Ingest default documents using Langflow upload-ingest-delete pipeline."""
 
@@ -989,7 +1015,9 @@ async def refresh_default_openrag_docs(
             previous_signature=previous_signature,
             new_signature=signature,
         )
-        await _delete_existing_default_docs(session_manager, connector_type="openrag_docs")
+        await _delete_existing_default_docs(
+            session_manager, connector_type="openrag_docs"
+        )
         await ingest_openrag_docs_when_ready(
             document_service,
             task_service,
@@ -1033,13 +1061,48 @@ async def health_check(request: Request):
 
 async def opensearch_health_ready(request):
     """Readiness probe: verifies OpenSearch dependency is reachable."""
-    from config.settings import IBM_AUTH_ENABLED
+    from config.settings import IBM_AUTH_ENABLED, OPENSEARCH_URL
 
     if IBM_AUTH_ENABLED:
-        return JSONResponse(
-            {"status": "ready", "note": "IBM auth mode - health checked per-request"},
-            status_code=200,
-        )
+        logger.debug("[IBM Auth] IBM auth mode enabled, health check per-request")
+        # In IBM auth mode we cannot rely on the global OpenSearch client
+        # (auth is established per-request), so perform a lightweight,
+        # unauthenticated connectivity check against the OpenSearch endpoint.
+        opensearch_url = OPENSEARCH_URL.rstrip("/")
+        try:
+            timeout = httpx.Timeout(5.0)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.get(f"{opensearch_url}/")
+            if resp.status_code < 500:
+                logger.debug("[IBM Auth] OpenSearch health check successful")
+                return JSONResponse(
+                    {
+                        "status": "ready",
+                        "dependencies": {"opensearch": "up"},
+                        "note": "IBM auth mode - connectivity verified via unauthenticated probe",
+                    },
+                    status_code=200,
+                )
+            else:
+                logger.debug("[IBM Auth] OpenSearch health check failed")
+                return JSONResponse(
+                    {
+                        "status": "not_ready",
+                        "dependencies": {"opensearch": "down"},
+                        "error": f"Unexpected status from OpenSearch: {resp.status_code}",
+                    },
+                    status_code=503,
+                )
+        except Exception as e:
+            logger.debug("[IBM Auth] OpenSearch health check failed", error=str(e))
+            return JSONResponse(
+                {
+                    "status": "not_ready",
+                    "dependencies": {"opensearch": "down"},
+                    "error": str(e),
+                },
+                status_code=503,
+            )
 
     try:
         await asyncio.wait_for(clients.opensearch.info(), timeout=5.0)
@@ -1059,7 +1122,11 @@ async def opensearch_health_ready(request):
 
 
 async def _ingest_default_documents_openrag(
-    document_service, task_service, file_paths, connector_type: str = "openrag_docs",existing_task_id: str = None,
+    document_service,
+    task_service,
+    file_paths,
+    connector_type: str = "openrag_docs",
+    existing_task_id: str = None,
     jwt_token=None,
 ):
     """Ingest default documents using traditional OpenRAG processor."""
@@ -1080,7 +1147,9 @@ async def _ingest_default_documents_openrag(
         connector_type=connector_type,
     )
 
-    task_id = await task_service.create_custom_task("anonymous", file_paths, processor, existing_task_id=existing_task_id)
+    task_id = await task_service.create_custom_task(
+        "anonymous", file_paths, processor, existing_task_id=existing_task_id
+    )
     logger.info(
         "Started traditional OpenRAG ingestion task",
         task_id=task_id,
@@ -1109,7 +1178,9 @@ async def _update_mcp_servers_with_provider_credentials(services):
         from utils.langflow_headers import build_mcp_global_vars_from_config
 
         flows_service = services.get("flows_service")
-        global_vars = await build_mcp_global_vars_from_config(config, flows_service=flows_service)
+        global_vars = await build_mcp_global_vars_from_config(
+            config, flows_service=flows_service
+        )
 
         # In no-auth mode, add the anonymous JWT token and user details
         if is_no_auth_mode() and session_manager:
@@ -1296,6 +1367,7 @@ async def initialize_services():
     generate_jwt_keys()
 
     from config.settings import IBM_AUTH_ENABLED
+
     if IBM_AUTH_ENABLED:
         logger.info("IBM auth mode enabled — JWT validation delegated to Traefik")
 
@@ -1375,8 +1447,6 @@ async def initialize_services():
     await TelemetryClient.send_event(
         Category.SERVICE_INITIALIZATION, MessageId.ORB_SVC_INIT_SUCCESS
     )
-
-
 
     # API Key service for public API authentication
     api_key_service = APIKeyService(session_manager)
@@ -1554,27 +1624,100 @@ async def create_app():
         "/auth/callback", auth.auth_callback, methods=["POST"], tags=["internal"]
     )
     app.add_api_route("/auth/me", auth.auth_me, methods=["GET"], tags=["internal"])
-    app.add_api_route("/auth/logout", auth.auth_logout, methods=["POST"], tags=["internal"])
-    app.add_api_route("/auth/ibm/login", auth.ibm_login, methods=["POST"], tags=["internal"])
+    app.add_api_route(
+        "/auth/logout", auth.auth_logout, methods=["POST"], tags=["internal"]
+    )
+    app.add_api_route(
+        "/auth/ibm/login", auth.ibm_login, methods=["POST"], tags=["internal"]
+    )
 
     # Connector endpoints
-    app.add_api_route("/connectors", connectors.list_connectors, methods=["GET"], tags=["internal"])
+    app.add_api_route(
+        "/connectors", connectors.list_connectors, methods=["GET"], tags=["internal"]
+    )
     # IBM COS-specific routes (registered before generic /{connector_type}/... to avoid shadowing)
-    app.add_api_route("/connectors/ibm_cos/defaults", ibm_cos_defaults, methods=["GET"], tags=["internal"])
-    app.add_api_route("/connectors/ibm_cos/configure", ibm_cos_configure, methods=["POST"], tags=["internal"])
-    app.add_api_route("/connectors/ibm_cos/{connection_id}/buckets", ibm_cos_list_buckets, methods=["GET"], tags=["internal"])
-    app.add_api_route("/connectors/ibm_cos/{connection_id}/bucket-status", ibm_cos_bucket_status, methods=["GET"], tags=["internal"])
+    app.add_api_route(
+        "/connectors/ibm_cos/defaults",
+        ibm_cos_defaults,
+        methods=["GET"],
+        tags=["internal"],
+    )
+    app.add_api_route(
+        "/connectors/ibm_cos/configure",
+        ibm_cos_configure,
+        methods=["POST"],
+        tags=["internal"],
+    )
+    app.add_api_route(
+        "/connectors/ibm_cos/{connection_id}/buckets",
+        ibm_cos_list_buckets,
+        methods=["GET"],
+        tags=["internal"],
+    )
+    app.add_api_route(
+        "/connectors/ibm_cos/{connection_id}/bucket-status",
+        ibm_cos_bucket_status,
+        methods=["GET"],
+        tags=["internal"],
+    )
     # AWS S3-specific routes (registered before generic /{connector_type}/... to avoid shadowing)
-    app.add_api_route("/connectors/aws_s3/defaults", s3_defaults, methods=["GET"], tags=["internal"])
-    app.add_api_route("/connectors/aws_s3/configure", s3_configure, methods=["POST"], tags=["internal"])
-    app.add_api_route("/connectors/aws_s3/{connection_id}/buckets", s3_list_buckets, methods=["GET"], tags=["internal"])
-    app.add_api_route("/connectors/aws_s3/{connection_id}/bucket-status", s3_bucket_status, methods=["GET"], tags=["internal"])
-    app.add_api_route("/connectors/{connector_type}/sync", connectors.connector_sync, methods=["POST"], tags=["internal"])
-    app.add_api_route("/connectors/sync-all", connectors.sync_all_connectors, methods=["POST"], tags=["internal"])
-    app.add_api_route("/connectors/{connector_type}/status", connectors.connector_status, methods=["GET"], tags=["internal"])
-    app.add_api_route("/connectors/{connector_type}/token", connectors.connector_token, methods=["GET"], tags=["internal"])
-    app.add_api_route("/connectors/{connector_type}/disconnect", connectors.connector_disconnect, methods=["DELETE"], tags=["internal"])
-    app.add_api_route("/connectors/{connector_type}/webhook", connectors.connector_webhook, methods=["POST", "GET"], tags=["internal"])
+    app.add_api_route(
+        "/connectors/aws_s3/defaults", s3_defaults, methods=["GET"], tags=["internal"]
+    )
+    app.add_api_route(
+        "/connectors/aws_s3/configure",
+        s3_configure,
+        methods=["POST"],
+        tags=["internal"],
+    )
+    app.add_api_route(
+        "/connectors/aws_s3/{connection_id}/buckets",
+        s3_list_buckets,
+        methods=["GET"],
+        tags=["internal"],
+    )
+    app.add_api_route(
+        "/connectors/aws_s3/{connection_id}/bucket-status",
+        s3_bucket_status,
+        methods=["GET"],
+        tags=["internal"],
+    )
+    app.add_api_route(
+        "/connectors/{connector_type}/sync",
+        connectors.connector_sync,
+        methods=["POST"],
+        tags=["internal"],
+    )
+    app.add_api_route(
+        "/connectors/sync-all",
+        connectors.sync_all_connectors,
+        methods=["POST"],
+        tags=["internal"],
+    )
+    app.add_api_route(
+        "/connectors/{connector_type}/status",
+        connectors.connector_status,
+        methods=["GET"],
+        tags=["internal"],
+    )
+    app.add_api_route(
+        "/connectors/{connector_type}/token",
+        connectors.connector_token,
+        methods=["GET"],
+        tags=["internal"],
+    )
+    app.add_api_route(
+        "/connectors/{connector_type}/disconnect",
+        connectors.connector_disconnect,
+        methods=["DELETE"],
+        tags=["internal"],
+    )
+    app.add_api_route(
+        "/connectors/{connector_type}/webhook",
+        connectors.connector_webhook,
+        methods=["POST", "GET"],
+        tags=["internal"],
+    )
 
     # Document endpoints
     app.add_api_route(
