@@ -176,7 +176,7 @@ async def configure_alerting_security():
             "Alerting security settings configured successfully", response=response
         )
     except Exception as e:
-        logger.warning("Failed to configure alerting security settings", error=str(e))
+        logger.error("Failed to configure alerting security settings", error=str(e))
         # Don't fail startup if alerting config fails
 
 
@@ -383,7 +383,7 @@ def generate_jwt_keys():
             os.chmod(public_key_path, 0o644)
             logger.info("RSA keys already exist, ensured correct permissions")
         except OSError as e:
-            logger.warning("Failed to set permissions on existing keys", error=str(e))
+            logger.error("Failed to set permissions on existing keys", error=str(e))
 
 
 def _get_documents_dir():
@@ -722,7 +722,7 @@ async def _ingest_default_documents_url(
         except FileNotFoundError:
             pass
         except Exception as e:
-            logger.warning(
+            logger.error(
                 "Failed to clean temporary default URL docs file",
                 path=temp_file_path,
                 error=str(e),
@@ -921,7 +921,7 @@ async def _get_remote_docs_signature(docs_url: str):
                 return None
             return hashlib.sha256(get_response.text.encode("utf-8")).hexdigest()
     except Exception as e:
-        logger.warning(
+        logger.error(
             "Unable to retrieve remote docs signature",
             docs_url=docs_url,
             error=str(e),
@@ -1096,12 +1096,12 @@ async def opensearch_health_ready(request):
                     status_code=503,
                 )
         except Exception as e:
-            logger.debug("[IBM Auth] OpenSearch health check failed", error=str(e))
+            logger.error("[IBM Auth] OpenSearch health check failed", error=str(e))
             return JSONResponse(
                 {
                     "status": "not_ready",
                     "dependencies": {"opensearch": "down"},
-                    "error": str(e),
+                    "error": "OpenSearch health check failed",
                 },
                 status_code=503,
             )
@@ -1113,11 +1113,12 @@ async def opensearch_health_ready(request):
             status_code=200,
         )
     except Exception as e:
+        logger.error("[IBM Auth] OpenSearch health check failed", error=str(e))
         return JSONResponse(
             {
                 "status": "not_ready",
                 "dependencies": {"opensearch": "down"},
-                "error": str(e),
+                "error": "OpenSearch health check failed",
             },
             status_code=503,
         )
@@ -1218,7 +1219,7 @@ async def _update_mcp_servers_with_provider_credentials(services):
             )
 
     except Exception as e:
-        logger.warning(
+        logger.error(
             "Failed to update MCP servers with provider credentials at startup",
             error=str(e),
         )
@@ -1287,7 +1288,7 @@ async def startup_tasks(services):
             services["session_manager"],
         )
     except Exception as e:
-        logger.warning("Default docs reingestion on upgrade failed", error=str(e))
+        logger.error("Default docs reingestion on upgrade failed", error=str(e))
 
     if FETCH_OPENRAG_DOCS_AT_STARTUP and not upgrade_reingested:
         try:
@@ -1300,7 +1301,7 @@ async def startup_tasks(services):
                 reason="startup",
             )
         except Exception as e:
-            logger.warning("OpenRAG docs startup refresh failed", error=str(e))
+            logger.error("OpenRAG docs startup refresh failed", error=str(e))
 
     # Update MCP servers with provider credentials (especially important for no-auth mode)
     await _update_mcp_servers_with_provider_credentials(services)
@@ -1437,7 +1438,7 @@ async def initialize_services():
                 loaded_count=loaded_count,
             )
         except Exception as e:
-            logger.warning(
+            logger.error(
                 "Failed to load persisted connections on startup", error=str(e)
             )
             await TelemetryClient.send_event(
