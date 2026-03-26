@@ -7,6 +7,7 @@ import {
   type GetRowIdParams,
   themeQuartz,
   type ValueFormatterParams,
+  type ValueGetterParams,
 } from "ag-grid-community";
 import { AgGridReact, type CustomCellRendererProps } from "ag-grid-react";
 import { Cloud, FileIcon, Globe, RefreshCw } from "lucide-react";
@@ -225,6 +226,29 @@ function SearchPage() {
     return "";
   }, []);
 
+  const getOwnerLabel = useCallback((file?: File): string => {
+    return file?.owner_name?.trim() || file?.owner_email?.trim() || "—";
+  }, []);
+
+  const getStatusSortRank = useCallback((status?: File["status"]): number => {
+    switch (status) {
+      case "active":
+        return 0;
+      case "processing":
+        return 1;
+      case "sync":
+        return 2;
+      case "failed":
+        return 3;
+      case "unavailable":
+        return 4;
+      case "hidden":
+        return 5;
+      default:
+        return 0;
+    }
+  }, []);
+
   const hasOpenragRefreshCueFromTasks = tasks.some((task) => {
     const isTaskActive =
       task.status === "pending" ||
@@ -332,6 +356,7 @@ function SearchPage() {
     {
       field: "filename",
       headerName: "Source",
+      sortable: true,
       checkboxSelection: (params: CheckboxSelectionCallbackParams<File>) =>
         (params?.data?.status || "active") === "active",
       headerCheckboxSelection: true,
@@ -395,22 +420,34 @@ function SearchPage() {
     {
       field: "mimetype",
       headerName: "Type",
+      sortable: true,
     },
     {
       field: "owner",
       headerName: "Owner",
-      valueFormatter: (params: ValueFormatterParams<File>) =>
-        params.data?.owner_name || params.data?.owner_email || "—",
+      sortable: true,
+      valueGetter: (params: ValueGetterParams<File>) =>
+        getOwnerLabel(params.data),
+      comparator: (valueA?: string, valueB?: string) =>
+        (valueA || "—").localeCompare(valueB || "—", undefined, {
+          sensitivity: "base",
+        }),
     },
     {
       field: "chunkCount",
       headerName: "Chunks",
+      sortable: true,
+      comparator: (valueA?: number, valueB?: number) =>
+        (valueA || 0) - (valueB || 0),
       valueFormatter: (params: ValueFormatterParams<File>) =>
         params.data?.chunkCount?.toString() || "-",
     },
     {
       field: "avgScore",
       headerName: "Avg score",
+      sortable: true,
+      comparator: (valueA?: number, valueB?: number) =>
+        (valueA || 0) - (valueB || 0),
       cellRenderer: ({ value }: CustomCellRendererProps<File>) => {
         return (
           <span className="text-xs text-accent-emerald-foreground bg-accent-emerald px-2 py-1 rounded">
@@ -422,6 +459,7 @@ function SearchPage() {
     {
       field: "embedding_model",
       headerName: "Embedding model",
+      sortable: true,
       minWidth: 200,
       cellRenderer: ({ data }: CustomCellRendererProps<File>) => (
         <span className="text-xs text-muted-foreground">
@@ -432,6 +470,9 @@ function SearchPage() {
     {
       field: "embedding_dimensions",
       headerName: "Dimensions",
+      sortable: true,
+      comparator: (valueA?: number, valueB?: number) =>
+        (valueA || 0) - (valueB || 0),
       width: 110,
       cellRenderer: ({ data }: CustomCellRendererProps<File>) => (
         <span className="text-xs text-muted-foreground">
@@ -444,6 +485,11 @@ function SearchPage() {
     {
       field: "status",
       headerName: "Status",
+      sortable: true,
+      valueGetter: (params: ValueGetterParams<File>) =>
+        params.data?.status || "active",
+      comparator: (valueA?: File["status"], valueB?: File["status"]) =>
+        getStatusSortRank(valueA) - getStatusSortRank(valueB),
       cellRenderer: ({ data }: CustomCellRendererProps<File>) => {
         const status = data?.status || "active";
         const showOpenragRefreshCue =
