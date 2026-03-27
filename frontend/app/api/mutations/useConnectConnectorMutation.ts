@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/auth-context";
 import { encodeBase64 } from "@/lib/utils";
 import type { Connector } from "../queries/useGetConnectorsQuery";
 
@@ -15,6 +16,7 @@ interface ConnectResponse {
 
 export const useConnectConnectorMutation = () => {
   const queryClient = useQueryClient();
+  const { isIbmAuthMode } = useAuth();
 
   return useMutation({
     mutationFn: async ({
@@ -69,9 +71,11 @@ export const useConnectConnectorMutation = () => {
         localStorage.setItem("connecting_connector_type", connector.type);
         localStorage.setItem("auth_purpose", "data_source");
 
-        const returnUrl = `${window.location.origin}/auth/callback`;
-        const stateQuery = `id=${result.connection_id}&return=${returnUrl}`;
-        const state = encodeBase64(stateQuery);
+        const state = isIbmAuthMode
+          ? encodeBase64(
+              `id=${result.connection_id}&return=${window.location.origin}/auth/callback`,
+            )
+          : result.connection_id;
 
         const authUrl =
           `${result.oauth_config.authorization_endpoint}?` +

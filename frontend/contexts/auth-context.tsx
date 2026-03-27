@@ -151,11 +151,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
             ),
           });
 
-          const returnUrl = `${window.location.origin}/auth/callback`;
-          const stateQuery = `id=${result.connection_id}&return=${returnUrl}`;
-          const state = encodeBase64(stateQuery);
+          const state = isIbmAuthMode
+            ? encodeBase64(
+                `id=${result.connection_id}&return=${window.location.origin}/auth/callback`,
+              )
+            : result.connection_id;
 
-          console.log("OAuth state (encoded):", state, "decoded:", stateQuery);
+          console.log("OAuth state (encoded):", state);
 
           const authUrl =
             `${result.oauth_config.authorization_endpoint}?` +

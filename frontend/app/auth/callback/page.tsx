@@ -18,7 +18,7 @@ import { decodeBase64 } from "@/lib/utils";
 function AuthCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { refreshAuth } = useAuth();
+  const { refreshAuth, isIbmAuthMode } = useAuth();
   const [status, setStatus] = useState<"processing" | "success" | "error">(
     "processing",
   );
@@ -87,9 +87,9 @@ function AuthCallbackContent() {
         let parsedConnectionId = finalConnectorId;
         let stateReturnUrl: string | null = null;
 
-        if (stateParam) {
+        // In IBM auth mode, state is base64-encoded: id=<connection_id>&return=<broker_callback_url>
+        if (isIbmAuthMode && stateParam) {
           try {
-            // The entire state is now Base64 encoded: id=<connection_id>&return=<return_url>
             const decodedState = decodeBase64(stateParam);
             console.log("OAuth callback state (decoded):", decodedState);
             const params = new URLSearchParams(decodedState);
@@ -146,7 +146,6 @@ function AuthCallbackContent() {
             // App authentication - refresh auth context and redirect to home/original page
             await refreshAuth();
 
-            // Get redirect URL from state, search params, or default
             const redirectTo =
               stateReturnUrl || searchParams.get("redirect") || "/chat";
 
