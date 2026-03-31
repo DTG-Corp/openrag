@@ -1473,10 +1473,10 @@ async def initialize_services():
 
 async def create_app():
     """Create and configure the FastAPI application"""
-    services = await initialize_services()
-
     app = FastAPI(title="OpenRAG API", version=OPENRAG_VERSION, debug=True)
-    app.state.services = services  # Store services for cleanup
+    # Services are initialized in startup_event so all async clients bind
+    # to uvicorn's running event loop (not a temporary loop).
+    app.state.services = {}
     app.state.background_tasks = set()
 
     # Register route handlers — auth and service injection done via FastAPI Depends() in each handler
@@ -1972,6 +1972,9 @@ async def create_app():
     # Add startup event handler
     @app.on_event("startup")
     async def startup_event():
+        services = await initialize_services()
+        app.state.services = services
+
         await TelemetryClient.send_event(
             Category.APPLICATION_STARTUP, MessageId.ORB_APP_STARTED
         )
@@ -2029,12 +2032,14 @@ async def create_app():
     # Add shutdown event handler
     @app.on_event("shutdown")
     async def shutdown_event():
+        services = app.state.services
         await TelemetryClient.send_event(
             Category.APPLICATION_SHUTDOWN, MessageId.ORB_APP_SHUTDOWN
         )
-        await cleanup_subscriptions_proper(services)
-        # Cleanup task service (cancels background tasks and process pool)
-        await services["task_service"].shutdown()
+        if services:
+            await cleanup_subscriptions_proper(services)
+            # Cleanup task service (cancels background tasks and process pool)
+            await services["task_service"].shutdown()
         # Cleanup async clients
         await clients.cleanup()
         # Cleanup telemetry client
@@ -2106,7 +2111,7 @@ if __name__ == "__main__":
     # Register cleanup function
     atexit.register(cleanup)
 
-    # Create app asynchronously
+    # Build app object; services are initialized during FastAPI startup.
     app = asyncio.run(create_app())
 
     # Enable or disable HTTP access logging events
