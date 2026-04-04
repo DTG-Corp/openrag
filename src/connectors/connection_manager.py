@@ -518,7 +518,12 @@ class ConnectionManager:
             else:
                 raise ValueError(f"Unknown connector type: {config.connector_type}")
         except Exception as e:
-            logger.error(f"Failed to create {config.connector_type} connector: {e}")
+            # Missing OAuth credentials while probing available connectors is expected
+            # in deployments that do not use those providers.
+            if isinstance(e, (ValueError, RuntimeError, NotImplementedError)):
+                logger.debug(f"Connector {config.connector_type} unavailable: {e}")
+            else:
+                logger.error(f"Failed to create {config.connector_type} connector: {e}")
             # Re-raise the exception so caller can handle appropriately
             raise
 
