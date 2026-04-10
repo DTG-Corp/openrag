@@ -470,7 +470,8 @@ async def ingest_default_documents_when_ready(
             Category.DOCUMENT_INGESTION, MessageId.ORB_DOC_DEFAULT_START
         )
         task_id = None
-        if _should_use_url_default_docs_ingest():
+        use_url_default_docs = _should_use_url_default_docs_ingest()
+        if use_url_default_docs:
             task_id = await ingest_openrag_docs_when_ready(
                 document_service,
                 task_service,
@@ -478,22 +479,24 @@ async def ingest_default_documents_when_ready(
                 session_manager,
                 jwt_token=jwt_token,
             )
-        await ingest_openrag_docs_when_ready(
-            document_service,
-            task_service,
-            langflow_file_service,
-            session_manager,
-            jwt_token=jwt_token,
-        )
 
         base_dir = _get_documents_dir()
         if not os.path.isdir(base_dir):
+            if use_url_default_docs:
+                logger.info(
+                    "Default documents directory missing; skipping local sample files",
+                    base_dir=base_dir,
+                )
+                await TelemetryClient.send_event(
+                    Category.DOCUMENT_INGESTION, MessageId.ORB_DOC_DEFAULT_COMPLETE
+                )
+                return task_id
             raise FileNotFoundError(
                 f"Default documents directory not found: {base_dir}"
             )
 
         excluded_files = set(EXCLUDED_INGESTION_FILES)
-        if _should_use_url_default_docs_ingest():
+        if use_url_default_docs:
             excluded_files.update(URL_INGEST_EXCLUDED_INGESTION_FILES)
 
         file_paths = [
@@ -504,6 +507,15 @@ async def ingest_default_documents_when_ready(
         ]
 
         if not file_paths:
+            if use_url_default_docs:
+                logger.info(
+                    "No local default documents; URL sample ingest already run or not applicable",
+                    base_dir=base_dir,
+                )
+                await TelemetryClient.send_event(
+                    Category.DOCUMENT_INGESTION, MessageId.ORB_DOC_DEFAULT_COMPLETE
+                )
+                return task_id
             raise FileNotFoundError(f"No default documents found in {base_dir}")
 
         if DISABLE_INGEST_WITH_LANGFLOW:

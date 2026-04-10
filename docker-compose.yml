@@ -128,6 +128,18 @@ services:
     # Linux: Docker Engine does not auto-inject host.docker.internal; map it to the host gateway
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read()",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      start_period: 120s
 
   openrag-frontend:
     image: langflowai/openrag-frontend:${OPENRAG_VERSION:-latest}
@@ -136,9 +148,11 @@ services:
       dockerfile: Dockerfile.frontend
     container_name: openrag-frontend
     depends_on:
-      - openrag-backend
+      openrag-backend:
+        condition: service_healthy
     environment:
-      - OPENRAG_BACKEND_HOST=openrag-backend
+      - OPENRAG_BACKEND_HOST=${OPENRAG_BACKEND_HOST:-openrag-backend}
+      - OPENRAG_BACKEND_PORT=${OPENRAG_BACKEND_PORT:-8000}
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
 
